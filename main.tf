@@ -27,14 +27,14 @@ provider "libvirt" {
 
 variable "prefix" {
   type    = string
-  default = "terraform_example"
+  default = "ceph"
 }
 
 # see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/network.markdown
-resource "libvirt_network" "example" {
+resource "libvirt_network" "ceph_network" {
   name      = var.prefix
   mode      = "nat"
-  domain    = "example.test"
+  domain    = "ceph.test"
   addresses = ["10.17.3.0/24"]
   dhcp {
     enabled = false
@@ -53,64 +53,94 @@ resource "libvirt_network" "example" {
 # see https://cloudinit.readthedocs.io/en/latest/topics/examples.html#disk-setup
 # see https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html#datasource-nocloud
 # see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/libvirt/cloudinit_def.go#L133-L162
-resource "libvirt_cloudinit_disk" "example_cloudinit" {
-  name      = "${var.prefix}_example_cloudinit.iso"
+resource "libvirt_cloudinit_disk" "ceph_cloudinit" {
+  count = 3
+  name      = "${var.prefix}_cloudinit_${count.index}.iso"
   user_data = <<EOF
 #cloud-config
-fqdn: example.test
+ssh_pwauth: True
+chpasswd:
+  list: |
+     root:linux
+  expire: False
+fqdn: ceph.test
 manage_etc_hosts: true
 users:
   - name: vagrant
-    passwd: '$6$rounds=4096$NQ.EmIrGxn$rTvGsI3WIsix9TjWaDfKrt9tm3aa7SX7pzB.PSjbwtLbsplk1HsVzIrZbXwQNce6wmeJXhCq9YFJHDx9bXFHH.'
+    passwd: '$6$rounds=4096$.LnRXFeOXL5ik7t8$gGMDoOMZCThNb/1/8vnJQYvbgbeF6FFF6MTIobWppIRcQNL1epegpWOaztCcXiub.zB5J79EaQU6Jqshs.61d/'
     lock_passwd: false
     ssh-authorized-keys:
       - ${jsonencode(trimspace(file("~/.ssh/id_rsa.pub")))}
-disk_setup:
-  /dev/sdb:
-    table_type: mbr
-    layout:
-      - [100, 83]
-    overwrite: false
-fs_setup:
-  - label: data
-    device: /dev/sdb1
-    filesystem: ext4
-    overwrite: false
-mounts:
-  - [/dev/sdb1, /data, ext4, 'defaults,discard,nofail', '0', '2']
+    sudo:  ALL=(ALL) NOPASSWD:ALL
+  - name: rklimenk
+    passwd: '$6$rounds=4096$.LnRXFeOXL5ik7t8$gGMDoOMZCThNb/1/8vnJQYvbgbeF6FFF6MTIobWppIRcQNL1epegpWOaztCcXiub.zB5J79EaQU6Jqshs.61d/'
+    lock_passwd: false
+    ssh-authorized-keys:
+      - ${jsonencode(trimspace(file("~/.ssh/id_rsa.pub")))}
+    sudo:  ALL=(ALL) NOPASSWD:ALL
+#disk_setup:
+#  /dev/sdb:
+#    table_type: mbr
+#    layout:
+#      - [100, 83]
+#    overwrite: false
+#disk_setup:
+#  /dev/sdc:
+#    table_type: mbr
+#    layout:
+#      - [100, 83]
+#    overwrite: false
+#fs_setup:
+#  - label: data
+#    device: /dev/sdb1
+#    filesystem: ext4
+#    overwrite: false
+#mounts:
+#  - [/dev/sdb1, /data, ext4, 'defaults,discard,nofail', '0', '2']
 runcmd:
   - sed -i '/vagrant insecure public key/d' /home/vagrant/.ssh/authorized_keys
 EOF
 }
 
-# this uses the vagrant ubuntu image imported from https://github.com/rgl/ubuntu-vagrant.
-# see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/volume.html.markdown
-resource "libvirt_volume" "example_root" {
-  name             = "${var.prefix}_root.img"
-  base_volume_name = "ubuntu-22.04-amd64_vagrant_box_image_0.0.0_box.img"
+resource "libvirt_volume" "ubuntu_22" {
+  name   = "ubuntu_22"
+  source =  "/opt/libvirt-pool/box.img"
+}
+
+resource "libvirt_volume" "ceph_root" {
+  count            = 3
+  name             = "${var.prefix}_root_${count.index}.img"
+  base_volume_id   = libvirt_volume.ubuntu_22.id
   format           = "qcow2"
-  size             = 66 * 1024 * 1024 * 1024 # 66GiB. the root FS is automatically resized by cloud-init growpart (see https://cloudinit.readthedocs.io/en/latest/topics/examples.html#grow-partitions).
+  size             = 15 * 1024 * 1024 * 1024 # 10GiB. the root FS is automatically resized by cloud-init growpart (see https://cloudinit.readthedocs.io/en/latest/topics/examples.html#grow-partitions).
+  depends_on       = [ libvirt_volume.ubuntu_22 ]
 }
 
-# a data disk.
-# see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/volume.html.markdown
-resource "libvirt_volume" "example_data" {
-  name   = "${var.prefix}_data.img"
+resource "libvirt_volume" "ceph_osd1" {
+  count  = 3
+  name   = "${var.prefix}_osd1_${count.index}.img"
   format = "qcow2"
-  size   = 6 * 1024 * 1024 * 1024 # 6GiB.
+  size   = 15 * 1024 * 1024 * 1024 # 15GiB.
 }
 
-# see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/domain.html.markdown
-resource "libvirt_domain" "example" {
-  name    = var.prefix
+resource "libvirt_volume" "ceph_osd2" {
+  count  = 3
+  name   = "${var.prefix}_osd2_${count.index}.img"
+  format = "qcow2"
+  size   = 15 * 1024 * 1024 * 1024 # 15GiB.
+}
+
+resource "libvirt_domain" "ceph_vm" {
+  count   = 3
+  name    = "${var.prefix}_vm_${count.index}"
   machine = "q35"
   cpu {
     mode = "host-passthrough"
   }
   vcpu       = 2
-  memory     = 1024
+  memory     = 2048
   qemu_agent = true
-  cloudinit  = libvirt_cloudinit_disk.example_cloudinit.id
+  cloudinit  = libvirt_cloudinit_disk.ceph_cloudinit[count.index].id
   xml {
     xslt = file("libvirt-domain.xsl")
   }
@@ -118,17 +148,21 @@ resource "libvirt_domain" "example" {
     type = "qxl"
   }
   disk {
-    volume_id = libvirt_volume.example_root.id
+    volume_id = libvirt_volume.ceph_root[count.index].id
     scsi      = true
   }
   disk {
-    volume_id = libvirt_volume.example_data.id
+    volume_id = libvirt_volume.ceph_osd1[count.index].id
+    scsi      = true
+  }
+  disk {
+    volume_id = libvirt_volume.ceph_osd2[count.index].id
     scsi      = true
   }
   network_interface {
-    network_id     = libvirt_network.example.id
+    network_id     = libvirt_network.ceph_network.id
     wait_for_lease = true
-    addresses      = ["10.17.3.2"]
+    addresses      = ["10.17.3.${count.index+2}"]
   }
   provisioner "remote-exec" {
     inline = [
@@ -162,5 +196,5 @@ resource "libvirt_domain" "example" {
 }
 
 output "ip" {
-  value = length(libvirt_domain.example.network_interface[0].addresses) > 0 ? libvirt_domain.example.network_interface[0].addresses[0] : ""
+  value = libvirt_domain.ceph_vm[*].network_interface[0].addresses[0]
 }

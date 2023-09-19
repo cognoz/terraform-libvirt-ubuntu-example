@@ -1,8 +1,13 @@
-# Usage (Ubuntu 22.04 host)
+# Terraform KVM vms. Ceph case.
 
 [![Lint](https://github.com/rgl/terraform-libvirt-ubuntu-example/actions/workflows/lint.yml/badge.svg)](https://github.com/rgl/terraform-libvirt-ubuntu-example/actions/workflows/lint.yml)
 
 Create and install the [base Ubuntu 22.04 vagrant box](https://github.com/rgl/ubuntu-vagrant).
+Unpack your packer created image with tar
+```bash
+tar -xf ubuntu-22.04-amd64-libvirt.box
+```
+Use box.img as a reference in main.tf for creating libvirt_volume.
 
 Install Terraform:
 
