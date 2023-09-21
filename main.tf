@@ -30,6 +30,11 @@ variable "prefix" {
   default = "ceph"
 }
 
+variable "vm_count" {
+  type    = number
+  default = 4
+}
+
 # see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/network.markdown
 resource "libvirt_network" "ceph_network" {
   name      = var.prefix
@@ -45,6 +50,20 @@ resource "libvirt_network" "ceph_network" {
   }
 }
 
+resource "libvirt_network" "ceph_cluster_network" {
+  name      = "${var.prefix}_cluster"
+  mode      = "nat"
+  domain    = "ceph.test"
+  addresses = ["10.17.30.0/24"]
+  dhcp {
+    enabled = false
+  }
+  dns {
+    enabled    = false
+    local_only = false
+  }
+}
+
 # create a cloud-init cloud-config.
 # NB this creates an iso image that will be used by the NoCloud cloud-init datasource.
 # see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/website/docs/r/cloudinit.html.markdown
@@ -54,7 +73,7 @@ resource "libvirt_network" "ceph_network" {
 # see https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html#datasource-nocloud
 # see https://github.com/dmacvicar/terraform-provider-libvirt/blob/v0.7.1/libvirt/cloudinit_def.go#L133-L162
 resource "libvirt_cloudinit_disk" "ceph_cloudinit" {
-  count = 3
+  count = var.vm_count
   name      = "${var.prefix}_cloudinit_${count.index}.iso"
   user_data = <<EOF
 #cloud-config
@@ -108,7 +127,7 @@ resource "libvirt_volume" "ubuntu_22" {
 }
 
 resource "libvirt_volume" "ceph_root" {
-  count            = 3
+  count            = var.vm_count
   name             = "${var.prefix}_root_${count.index}.img"
   base_volume_id   = libvirt_volume.ubuntu_22.id
   format           = "qcow2"
@@ -117,21 +136,21 @@ resource "libvirt_volume" "ceph_root" {
 }
 
 resource "libvirt_volume" "ceph_osd1" {
-  count  = 3
+  count  = var.vm_count
   name   = "${var.prefix}_osd1_${count.index}.img"
   format = "qcow2"
   size   = 15 * 1024 * 1024 * 1024 # 15GiB.
 }
 
 resource "libvirt_volume" "ceph_osd2" {
-  count  = 3
+  count  = var.vm_count
   name   = "${var.prefix}_osd2_${count.index}.img"
   format = "qcow2"
   size   = 15 * 1024 * 1024 * 1024 # 15GiB.
 }
 
 resource "libvirt_domain" "ceph_vm" {
-  count   = 3
+  count   = var.vm_count
   name    = "${var.prefix}_vm_${count.index}"
   machine = "q35"
   cpu {
@@ -163,6 +182,11 @@ resource "libvirt_domain" "ceph_vm" {
     network_id     = libvirt_network.ceph_network.id
     wait_for_lease = true
     addresses      = ["10.17.3.${count.index+2}"]
+  }
+  network_interface {
+    network_id     = libvirt_network.ceph_cluster_network.id
+    wait_for_lease = true
+    addresses      = ["10.17.30.${count.index+2}"]
   }
   provisioner "remote-exec" {
     inline = [
